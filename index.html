@@ -1,0 +1,267 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>Twisty Cube</title>
+<style>
+  :root { color-scheme: dark; --bg:#10131b; --panel:#1a2030; --text:#f4f6ff; --muted:#aeb8cc; }
+  * { box-sizing: border-box; }
+  body { margin:0; min-height:100vh; background:radial-gradient(ellipse at top,#26334b 0%,var(--bg) 62%); color:var(--text); font-family:system-ui,-apple-system,Segoe UI,sans-serif; display:flex; justify-content:center; }
+  main { width:min(100%,760px); padding:18px 16px 28px; text-align:center; }
+  h1 { margin:4px 0 5px; font-size:clamp(1.7rem,5vw,2.5rem); letter-spacing:.02em; }
+  .sub { margin:0 auto 14px; color:var(--muted); font-size:.95rem; }
+  #stage { width:100%; height:min(58vh,440px); min-height:290px; border:1px solid #34415b; border-radius:22px; overflow:hidden; background:radial-gradient(ellipse at center,#202b40,#111722 72%); touch-action:none; }
+  canvas { display:block; width:100%; height:100%; }
+  .panel { margin-top:14px; padding:14px; border:1px solid #303b52; border-radius:18px; background:rgba(26,32,48,.88); }
+  .label { margin:0 0 9px; font-size:.8rem; font-weight:800; letter-spacing:.12em; color:#b7c4dc; text-transform:uppercase; }
+  .moves { display:grid; grid-template-columns:repeat(6,minmax(0,1fr)); gap:8px; }
+  button { border:1px solid #485875; border-radius:12px; padding:11px 6px; background:#29354c; color:#fff; font-weight:750; font-size:1rem; cursor:pointer; touch-action:manipulation; }
+  button:active { transform:scale(.97); background:#3b4c6b; }
+  .moves button { min-height:48px; }
+  .actions { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:8px; }
+  .actions button { font-size:.9rem; }
+  .primary { background:#216a59; border-color:#31957d; }
+  .warning { background:#693b42; border-color:#98515b; }
+  #status { margin:12px 0 0; font-weight:750; min-height:1.5em; color:#b5f2d7; }
+  .hint { color:var(--muted); font-size:.86rem; line-height:1.45; margin:10px 2px 0; }
+  @media(max-width:420px){ main{padding:12px 10px 22px} #stage{height:340px;min-height:270px}.moves{grid-template-columns:repeat(3,minmax(0,1fr))}.actions{grid-template-columns:repeat(2,minmax(0,1fr))} }
+</style>
+</head>
+<body>
+<main>
+  <h1>Twisty Cube</h1>
+  <p class="sub">A little 3D Rubik’s Cube you can scramble and solve.</p>
+  <div id="stage" aria-label="Interactive 3D Rubik's Cube"></div>
+
+  <section class="panel">
+    <p class="label">Turn a face</p>
+    <div class="moves">
+      <button data-move="U">U ↻</button><button data-move="U'">U ↺</button>
+      <button data-move="D">D ↻</button><button data-move="D'">D ↺</button>
+      <button data-move="L">L ↻</button><button data-move="L'">L ↺</button>
+      <button data-move="R">R ↻</button><button data-move="R'">R ↺</button>
+      <button data-move="F">F ↻</button><button data-move="F'">F ↺</button>
+      <button data-move="B">B ↻</button><button data-move="B'">B ↺</button>
+    </div>
+    <p class="hint">The arrows mean clockwise or counter-clockwise when looking straight at that face. Drag the cube to turn your view.</p>
+  </section>
+
+  <section class="panel">
+    <p class="label">Puzzle controls</p>
+    <div class="actions">
+      <button class="primary" id="shuffle">🎲 Shuffle</button>
+      <button id="undo">↶ Undo move</button>
+      <button id="redo">↷ Redo move</button>
+      <button id="spin">🌀 Juggle view</button>
+      <button id="stopSpin">⏸ Stop spin</button>
+      <button class="warning" id="reset">↻ Reset cube</button>
+    </div>
+    <div id="status" role="status">Ready when you are.</div>
+  </section>
+  <p class="hint">Tip: press Shuffle to start a puzzle. Reset returns every piece to its solved position. This page loads Three.js from a CDN, so you’ll need an internet connection.</p>
+</main>
+
+<script type="module">
+import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js';
+
+const stage = document.getElementById('stage');
+const statusEl = document.getElementById('status');
+const scene = new THREE.Scene();
+const camera = new THREE.PerspectiveCamera(42, 1, 0.1, 100);
+camera.position.set(5.8, 5.4, 7.3);
+camera.lookAt(0, 0, 0);
+const renderer = new THREE.WebGLRenderer({antialias:true, alpha:true});
+renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+renderer.setSize(stage.clientWidth, stage.clientHeight);
+renderer.outputColorSpace = THREE.SRGBColorSpace;
+stage.appendChild(renderer.domElement);
+scene.add(new THREE.AmbientLight(0xffffff, 2.0));
+const key = new THREE.DirectionalLight(0xffffff, 2.4);
+key.position.set(5, 8, 6); scene.add(key);
+const fill = new THREE.DirectionalLight(0x8caeff, 1.0);
+fill.position.set(-5, 2, -6); scene.add(fill);
+
+const root = new THREE.Group();
+scene.add(root);
+const colors = {
+  R: 0xc92f3b, L: 0xff8a19, U: 0xf5f5f0,
+  D: 0xffd329, F: 0x21b66f, B: 0x2876e8
+};
+const faceDirs = [
+  {name:'R', dir:[1,0,0]}, {name:'L', dir:[-1,0,0]},
+  {name:'U', dir:[0,1,0]}, {name:'D', dir:[0,-1,0]},
+  {name:'F', dir:[0,0,1]}, {name:'B', dir:[0,0,-1]}
+];
+const cubies = [];
+const cubieSize = 0.96;
+const spacing = 1.02;
+const dark = new THREE.MeshStandardMaterial({color:0x171b24, roughness:.62, metalness:.08});
+function makeCubie(x,y,z) {
+  const mats = [
+    faceDirs.find(f=>f.name==='R' && x===1) ? new THREE.MeshStandardMaterial({color:colors.R,roughness:.38}) : dark,
+    faceDirs.find(f=>f.name==='L' && x===-1) ? new THREE.MeshStandardMaterial({color:colors.L,roughness:.38}) : dark,
+    y===1 ? new THREE.MeshStandardMaterial({color:colors.U,roughness:.38}) : dark,
+    y===-1 ? new THREE.MeshStandardMaterial({color:colors.D,roughness:.38}) : dark,
+    z===1 ? new THREE.MeshStandardMaterial({color:colors.F,roughness:.38}) : dark,
+    z===-1 ? new THREE.MeshStandardMaterial({color:colors.B,roughness:.38}) : dark
+  ];
+  const mesh = new THREE.Mesh(new THREE.BoxGeometry(cubieSize,cubieSize,cubieSize), mats);
+  mesh.position.set(x*spacing,y*spacing,z*spacing);
+  mesh.userData.coord = {x,y,z};
+  root.add(mesh); cubies.push(mesh);
+}
+function buildCube() {
+  for(let x=-1;x<=1;x++) for(let y=-1;y<=1;y++) for(let z=-1;z<=1;z++) makeCubie(x,y,z);
+}
+buildCube();
+
+let busy = false, spinning = false;
+let history = [], redoStack = [];
+const moveInfo = {
+ U:{axis:'y',layer:1,angle:-Math.PI/2}, "U'":{axis:'y',layer:1,angle:Math.PI/2},
+ D:{axis:'y',layer:-1,angle:Math.PI/2}, "D'":{axis:'y',layer:-1,angle:-Math.PI/2},
+ R:{axis:'x',layer:1,angle:-Math.PI/2}, "R'":{axis:'x',layer:1,angle:Math.PI/2},
+ L:{axis:'x',layer:-1,angle:Math.PI/2}, "L'":{axis:'x',layer:-1,angle:-Math.PI/2},
+ F:{axis:'z',layer:1,angle:-Math.PI/2}, "F'":{axis:'z',layer:1,angle:Math.PI/2},
+ B:{axis:'z',layer:-1,angle:Math.PI/2}, "B'":{axis:'z',layer:-1,angle:-Math.PI/2}
+};
+const inverse = m => m.endsWith("'") ? m.slice(0,-1) : m+"'";
+
+function snap(n){ return Math.round(n/spacing)*spacing; }
+function updateCoords(meshes, axis, angle) {
+  const turns = Math.round(angle/(Math.PI/2));
+  for(const mesh of meshes) {
+    let {x,y,z} = mesh.userData.coord;
+    for(let i=0;i<((turns%4)+4)%4;i++) {
+      if(axis==='x') [y,z]=[-z,y];
+      if(axis==='y') [x,z]=[z,-x];
+      if(axis==='z') [x,y]=[-y,x];
+    }
+    mesh.userData.coord={x,y,z};
+    mesh.position.set(x*spacing,y*spacing,z*spacing);
+    mesh.quaternion.set(
+      Math.round(mesh.quaternion.x*100000)/100000,
+      Math.round(mesh.quaternion.y*100000)/100000,
+      Math.round(mesh.quaternion.z*100000)/100000,
+      Math.round(mesh.quaternion.w*100000)/100000
+    );
+  }
+}
+function isSolved() {
+  // A cube is solved when each outer face has one colour; check sticker normals after rotations.
+  const normals = [
+    {axis:new THREE.Vector3(1,0,0), idx:0},{axis:new THREE.Vector3(-1,0,0),idx:1},
+    {axis:new THREE.Vector3(0,1,0),idx:2},{axis:new THREE.Vector3(0,-1,0),idx:3},
+    {axis:new THREE.Vector3(0,0,1),idx:4},{axis:new THREE.Vector3(0,0,-1),idx:5}
+  ];
+  for(const f of normals) {
+    let found = [];
+    for(const c of cubies) {
+      const normal=f.axis.clone().applyQuaternion(c.quaternion);
+      if(Math.abs(c.position.dot(f.axis)-spacing)>0.15) continue;
+      // Face sticker on this cubie is identified by the transformed local face normal.
+      const localNormals=[new THREE.Vector3(1,0,0),new THREE.Vector3(-1,0,0),new THREE.Vector3(0,1,0),new THREE.Vector3(0,-1,0),new THREE.Vector3(0,0,1),new THREE.Vector3(0,0,-1)];
+      for(let i=0;i<6;i++) {
+        const n=localNormals[i].clone().applyQuaternion(c.quaternion);
+        if(n.dot(f.axis)>.98 && c.material[i].color && c.material[i]!==dark) found.push(c.material[i].color.getHex());
+      }
+    }
+    if(found.length!==9 || !found.every(v=>v===found[0])) return false;
+  }
+  return true;
+}
+function setStatus(text){ statusEl.textContent=text; }
+function turn(move, record=true) {
+  if(busy || !moveInfo[move]) return Promise.resolve();
+  busy=true; spinning=false;
+  const info=moveInfo[move], axis=info.axis, layer=info.layer, angle=info.angle;
+  const selected=cubies.filter(c=>c.userData.coord[axis]===layer);
+  const pivot=new THREE.Group(); root.add(pivot);
+  selected.forEach(c=>pivot.attach(c));
+  const start=performance.now(), duration=170;
+  return new Promise(resolve=>{
+    function animateTurn(now) {
+      const t=Math.min(1,(now-start)/duration);
+      const eased=1-Math.pow(1-t,3);
+      pivot.rotation[axis]=angle*eased;
+      if(t<1){ requestAnimationFrame(animateTurn); return; }
+      pivot.rotation[axis]=angle;
+      selected.forEach(c=>root.attach(c));
+      root.remove(pivot);
+      updateCoords(selected,axis,angle);
+      selected.forEach(c=>{
+        c.position.set(
+          Math.round(c.position.x/spacing)*spacing,
+          Math.round(c.position.y/spacing)*spacing,
+          Math.round(c.position.z/spacing)*spacing
+        );
+      });
+      busy=false;
+      if(record){history.push(move);redoStack=[];}
+      setStatus(isSolved() ? '🎉 Solved! You did it!' : `Last move: ${move}`);
+      resolve();
+    }
+    requestAnimationFrame(animateTurn);
+  });
+}
+document.querySelectorAll('[data-move]').forEach(b=>b.addEventListener('click',()=>turn(b.dataset.move)));
+document.getElementById('shuffle').addEventListener('click', async()=>{
+  if(busy) return;
+  history=[]; redoStack=[]; setStatus('Scrambling…');
+  const names=Object.keys(moveInfo); let prev='';
+  for(let i=0;i<22;i++){
+    let m=names[Math.floor(Math.random()*names.length)];
+    while(m[0]===prev) m=names[Math.floor(Math.random()*names.length)];
+    prev=m[0]; await turn(m,false);
+  }
+  history=[]; redoStack=[]; setStatus('Scrambled! Your turn — solve it.');
+});
+document.getElementById('undo').addEventListener('click',async()=>{
+  if(busy||!history.length)return;
+  const m=history.pop(); await turn(inverse(m),false); redoStack.push(m);
+});
+document.getElementById('redo').addEventListener('click',async()=>{
+  if(busy||!redoStack.length)return;
+  const m=redoStack.pop(); await turn(m,false); history.push(m);
+});
+document.getElementById('reset').addEventListener('click',()=>{
+  if(busy)return;
+  cubies.forEach(c=>{
+    const {x,y,z}=c.userData.coord;
+    c.quaternion.identity();
+    // reset orientation and stickers to the original solved arrangement
+    c.material.dispose?.();
+  });
+  root.clear(); cubies.length=0; buildCube();
+  history=[];redoStack=[];setStatus('Cube reset. All solved!');
+});
+document.getElementById('spin').addEventListener('click',()=>{spinning=true;setStatus('Juggle mode on — drag to take control.');});
+document.getElementById('stopSpin').addEventListener('click',()=>{spinning=false;setStatus('Juggle mode stopped.');});
+
+// Drag to orbit the entire cube; supports mouse and touch.
+let dragging=false, lastX=0,lastY=0;
+stage.addEventListener('pointerdown',e=>{dragging=true;lastX=e.clientX;lastY=e.clientY;stage.setPointerCapture(e.pointerId);});
+stage.addEventListener('pointermove',e=>{
+  if(!dragging)return;
+  const dx=e.clientX-lastX,dy=e.clientY-lastY;lastX=e.clientX;lastY=e.clientY;
+  root.rotation.y+=dx*.009;root.rotation.x+=dy*.009;
+  root.rotation.x=Math.max(-Math.PI,Math.min(Math.PI,root.rotation.x));
+});
+stage.addEventListener('pointerup',()=>dragging=false);
+stage.addEventListener('pointercancel',()=>dragging=false);
+
+function resize(){
+  const w=stage.clientWidth,h=stage.clientHeight;
+  camera.aspect=w/h;camera.updateProjectionMatrix();renderer.setSize(w,h);
+}
+new ResizeObserver(resize).observe(stage);
+function render(){
+  requestAnimationFrame(render);
+  if(spinning&&!dragging&&!busy){root.rotation.y+=.008;root.rotation.x+=.0025;}
+  renderer.render(scene,camera);
+}
+render();
+</script>
+</body>
+</html>
